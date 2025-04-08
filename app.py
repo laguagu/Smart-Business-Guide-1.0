@@ -1,6 +1,13 @@
-# __import__('pysqlite3')
-# import sys
-# sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+# Try to use pysqlite3 if available (in Rahti environment), 
+# otherwise use the standard sqlite3 (in local development)
+try:
+    __import__('pysqlite3')
+    import sys
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+    print("Using pysqlite3 module instead of sqlite3 (Rahti compatible)")
+except ImportError:
+    print("pysqlite3 not found, using standard sqlite3 module (local development)")
+    
 import io
 import re
 import sys
@@ -11,44 +18,74 @@ import torch
 import tornado
 from langchain_openai import ChatOpenAI
 
-from agentic_rag import initialize_app
-from st_callback import get_streamlit_cb
-
 # This code line below Fixes console "RuntimeError: Tried to instantiate class '__path__._path', but it does not exist!"
 # reference: https://github.com/VikParuchuri/marker/issues/442#issuecomment-2636393925
 torch.classes.__path__ = []
 
-# SETUP:
-#     1. Install the required packages:
-#         pip install -r requirements.txt
-#     2. Set secters.toml environment variables .streamlit/secters.toml
-#     3. Run the app:
-#         streamlit run app.py
+from agentic_rag import initialize_app
+from st_callback import get_streamlit_cb
 
-# TODO: App crashes if using "llama-3.1-8b-instant" model. Or Mixtral for selected_routing_model.
-#     Can be temp fixed by using ChatOpenAI as a fallback for routing model. Mixtral works still for selected_model
+# -------------------- Page Layout & Configuration --------------------
+st.set_page_config(
+    page_title="Smart Business Guide",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    page_icon="🧠"
+)
 
-# Early session state initialization alternative way to set default values.
-# default_keys = {
-#     "messages": [],
-#     "followup_key": 0,
-#     "pending_followup": None,
-#     "last_assistant": None,
-#     "followup_questions": [],
-#     "selected_model": "gpt-4o",
-#     "selected_routing_model": "gpt-4o",
-#     "selected_grading_model": "gpt-4o",
-#     "selected_embedding_model": "text-embedding-3-large",
-#     "hybrid_search": False,
-#     "internet_search": False,
-#     "answer_style": "Explanatory",
-#     # Include any additional keys used later (e.g., llm, embed_model)
-# }
-# for key, default in default_keys.items():
-#     if key not in st.session_state:
-#         st.session_state[key] = default
+st.markdown("""
+    <style>
+    .reference {
+        color: blue;
+        font-weight: bold;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
+# -------------------- Simple Authentication --------------------
+def check_password():
+    """Returns `True` if the user has entered the correct username and password."""
+    # Username and password hard-coded for simplicity
+    CORRECT_USERNAME = "upbeat"
+    CORRECT_PASSWORD = "upbeathh2025!"
+    
+    # Initialize session_state
+    if "username" not in st.session_state:
+        st.session_state["username"] = ""
+    if "password" not in st.session_state:
+        st.session_state["password"] = ""
+    if "authenticated" not in st.session_state:
+        st.session_state["authenticated"] = False
+        
+    # If already authenticated, return True
+    if st.session_state["authenticated"]:
+        return True
+    
+    # Otherwise show login form
+    st.title("Smart Business Guide - Login")
+    
+    # Create login form
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        username = st.text_input("Username", key="username_input")
+        password = st.text_input("Password", type="password", key="password_input")
+        
+        if st.button("Login"):
+            if username == CORRECT_USERNAME and password == CORRECT_PASSWORD:
+                st.session_state["authenticated"] = True
+                st.session_state["username"] = username
+                st.rerun()
+            else:
+                st.error("Incorrect username or password")
+                
+    with col2:
+        st.image("images/LOGO_UPBEAT.jpg", width=300)
+        
+    return False
 
+# Check authentication before showing app content
+if not check_password():
+    st.stop()  # Stop execution here if not authenticated
 
 # -------------------- Initialization --------------------
 st.set_option("client.showErrorDetails", False)  # Hide error detail
@@ -64,8 +101,6 @@ if "followup_questions" not in st.session_state:
     st.session_state.followup_questions = []
 
 # -------------------- Helper Functions --------------------
-
-
 def get_followup_questions(last_user, last_assistant):
     """
     Generate three concise follow-up questions dynamically based on the latest conversation.
@@ -210,23 +245,6 @@ def process_question(question, answer_style):
     st.session_state.followup_key += 1
 
 
-# -------------------- Page Layout & Configuration --------------------
-st.set_page_config(
-    page_title="Smart Business Guide",
-    layout="wide",
-    initial_sidebar_state="expanded",
-    page_icon="🧠"
-)
-
-st.markdown("""
-    <style>
-    .reference {
-        color: blue;
-        font-weight: bold;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
 # -------------------- Sidebar --------------------
 with st.sidebar:
     try:
@@ -236,6 +254,11 @@ with st.sidebar:
 
     st.title("🗣️ Smart Guide 1.0")
     st.markdown("**▶️ Actions:**")
+    
+    # Add logout button to sidebar
+    if st.button("🚪 Logout"):
+        st.session_state["authenticated"] = False
+        st.rerun()
 
     # Set default model selections if not present.
     if "selected_model" not in st.session_state:
@@ -270,47 +293,6 @@ with st.sidebar:
             key="answer_style_slider"
         )
     st.session_state.answer_style = answer_style
-
-    # # Create a separate list without deepseek for routing and grading
-    # other_models_list = [model for model in model_list if model != "deepseek-r1-distill-llama-70b"]
-
-    # with st.expander("⚙️ Settings", expanded=False):
-    #     st.session_state.selected_model = st.selectbox(
-    #         "🤖 Select Answering LLM",
-    #         model_list,
-    #         key="model_selector",
-    #         index=min(model_list.index(st.session_state.selected_model) 
-    #                 if st.session_state.selected_model in model_list else 0, 
-    #                 len(model_list) - 1)
-    #     )
-        
-    #     # For routing model, use the list without deepseek
-    #     routing_index = (other_models_list.index(st.session_state.selected_routing_model) 
-    #                     if st.session_state.selected_routing_model in other_models_list 
-    #                     else 0)
-    #     st.session_state.selected_routing_model = st.selectbox(
-    #         "📡 Select Routing LLM",
-    #         other_models_list,
-    #         key="routing_model_selector",
-    #         index=routing_index
-    #     )
-        
-    #     # For grading model, use the list without deepseek
-    #     grading_index = (other_models_list.index(st.session_state.selected_grading_model) 
-    #                     if st.session_state.selected_grading_model in other_models_list 
-    #                     else 0)
-    #     st.session_state.selected_grading_model = st.selectbox(
-    #         "🧮 Select Retrieval Grading LLM",
-    #         other_models_list,
-    #         key="grading_model_selector",
-    #         index=grading_index
-    #     )
-    #     st.session_state.selected_embedding_model = st.selectbox(
-    #         "🧠 Select Embedding Model",
-    #         embed_list,
-    #         key="embedding_model_selector",
-    #         index=embed_list.index(st.session_state.selected_embedding_model)
-    #     )
 
     ############################# hard-coded selected model without the option to select from the dropdown menu.
     if 'selected_model' not in st.session_state:
@@ -417,11 +399,8 @@ if user_input:
         process_question(user_input, st.session_state.answer_style)
 
 # -------------------- Helper function for Follow-Up --------------------
-
-
 def handle_followup(question: str):
     st.session_state.pending_followup = question
-
 
 # -------------------- Generate and Display Follow-Up Questions --------------------
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
@@ -470,321 +449,3 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "assis
     except Exception as e:
         print(f"Error in followup section: {e}")
         st.session_state.followup_questions = []
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# import streamlit as st
-# import sys
-# import io
-# import time
-# from agentic_rag import initialize_app
-# from langchain_openai import ChatOpenAI
-
-# # -------------------- Initialization --------------------
-# if "messages" not in st.session_state:
-#     st.session_state.messages = []
-# if "followup_key" not in st.session_state:
-#     st.session_state.followup_key = 0
-# if "pending_followup" not in st.session_state:
-#     st.session_state.pending_followup = None
-# if "last_assistant" not in st.session_state:
-#     st.session_state.last_assistant = None
-# if "followup_questions" not in st.session_state:
-#     st.session_state.followup_questions = []
-
-# # -------------------- Helper Functions --------------------
-# def get_followup_questions(last_user, last_assistant):
-#     """
-#     Generate three concise follow-up questions dynamically based on the latest conversation.
-#     """
-#     prompt = f"""Based on the conversation below:
-#         User: {last_user}
-#         Assistant: {last_assistant}
-#         Generate three concise follow-up questions that a user might ask next.
-#         Each question should be on a separate line. The generated questions should be independent and can be answered without knowing the last question. Focus on brevity.
-#         Follow-up Questions:"""
-#     response = st.session_state.llm.invoke(prompt)
-#     text = response.content if hasattr(response, "content") else str(response)
-#     questions = [q.strip() for q in text.split('\n') if q.strip()]
-#     return questions[:3]
-
-# def process_question(question, answer_style):
-#     """
-#     Process a question (typed or follow-up):
-#       1. Append as a user message.
-#       2. Run the RAG workflow (via app.stream).
-#       3. Stream and append the assistant's response.
-#     """
-#     st.session_state.messages.append({"role": "user", "content": question})
-#     with st.chat_message("user"):
-#         st.markdown(f"**You:** {question}")
-    
-#     output_buffer = io.StringIO()
-#     sys.stdout = output_buffer
-#     assistant_response = ""
-#     with st.chat_message("assistant"):
-#         response_placeholder = st.empty()
-#         debug_placeholder = st.empty()
-#         with st.spinner("Thinking..."):
-#             inputs = {
-#                 "question": question,
-#                 "hybrid_search": st.session_state.hybrid_search,
-#                 "internet_search": st.session_state.internet_search,
-#                 "answer_style": answer_style
-#             }
-#             for i, output in enumerate(app.stream(inputs)):
-#                 debug_logs = output_buffer.getvalue()
-#                 debug_placeholder.text_area("Debug Logs", debug_logs, height=100, key=f"debug_logs_{i}")
-#                 if "generate" in output and "generation" in output["generate"]:
-#                     assistant_response += output["generate"]["generation"]
-#                     # Process the response to add styling to references
-#                     import re
-#                     styled_response = re.sub(
-#                         r'\[(.*?)\]',
-#                         r'<span class="reference">[\1]</span>',
-#                         assistant_response
-#                     )
-#                     response_placeholder.markdown(
-#                         f"**Assistant:** {styled_response}",
-#                         unsafe_allow_html=True
-#                     )
-#     st.session_state.messages.append({"role": "assistant", "content": assistant_response})
-#     sys.stdout = sys.__stdout__
-#     st.session_state.followup_key += 1
-
-# # -------------------- Page Layout & Configuration --------------------
-# st.set_page_config(
-#     page_title="Smart Business Guide",
-#     layout="wide",
-#     initial_sidebar_state="expanded",
-#     page_icon="🧠"
-# )
-
-# st.markdown("""
-#     <style>
-#     .reference {
-#         color: blue;
-#         font-weight: bold;
-#     }
-#     </style>
-# """, unsafe_allow_html=True)
-
-# # -------------------- Sidebar --------------------
-# with st.sidebar:
-#     try:
-#         st.image("images/LOGO_UPBEAT.jpg", width=150, use_container_width=True)
-#     except Exception as e:
-#         st.warning("Unable to load image. Continuing without it.")
-
-#     st.title("🗣️ Smart Guide 1.0")
-#     st.markdown("**▶️ Actions:**")
-
-#     # Set default model selections if not present.
-#     if "selected_model" not in st.session_state:
-#         st.session_state.selected_model = "gpt-4o"
-#     if "selected_routing_model" not in st.session_state:
-#         st.session_state.selected_routing_model = "gpt-4o"
-#     if "selected_grading_model" not in st.session_state:
-#         st.session_state.selected_grading_model = "gpt-4o"
-#     if "selected_embedding_model" not in st.session_state:
-#         st.session_state.selected_embedding_model = "text-embedding-3-large"
-
-#     model_list = [
-#         "llama-3.1-8b-instant",
-#         "llama-3.3-70b-versatile",
-#         "llama3-70b-8192",
-#         "llama3-8b-8192",
-#         "mixtral-8x7b-32768",
-#         "gemma2-9b-it",
-#         "gpt-4o-mini",
-#         "gpt-4o",
-#         "deepseek-r1-distill-llama-70b"
-#     ]
-#     embed_list = [
-#         "text-embedding-3-large",
-#         "sentence-transformers/all-MiniLM-L6-v2"
-#     ]
-
-#     with st.expander("⚙️ Settings", expanded=False):
-#         st.session_state.selected_model = st.selectbox(
-#             "🤖 Select Answering LLM",
-#             model_list,
-#             key="model_selector",
-#             index=model_list.index(st.session_state.selected_model)
-#         )
-#         st.session_state.selected_routing_model = st.selectbox(
-#             "📡 Select Routing LLM",
-#             model_list,
-#             key="routing_model_selector",
-#             index=model_list.index(st.session_state.selected_routing_model)
-#         )
-#         st.session_state.selected_grading_model = st.selectbox(
-#             "🧮 Select Retrieval Grading LLM",
-#             model_list,
-#             key="grading_model_selector",
-#             index=model_list.index(st.session_state.selected_grading_model)
-#         )
-#         st.session_state.selected_embedding_model = st.selectbox(
-#             "🧠 Select Embedding Model",
-#             embed_list,
-#             key="embedding_model_selector",
-#             index=embed_list.index(st.session_state.selected_embedding_model)
-#         )
-#         answer_style = st.select_slider(
-#             "💬 Answer Style",
-#             options=["Concise", "Moderate", "Explanatory"],
-#             value="Explanatory",
-#             key="answer_style_slider"
-#         )
-#         st.session_state.answer_style = answer_style
-
-#     search_option = st.radio(
-#         "Search options",
-#         ["Reliable documents", "Reliable web sources", "Reliable docs & web sources"],
-#         index=0
-#     )
-#     st.session_state.hybrid_search = (search_option == "Reliable docs & web sources")
-#     st.session_state.internet_search = (search_option == "Reliable web sources")
-    
-#     if st.button("🔄 Reset Conversation", key="reset_button"):
-#         st.session_state.messages = []
-
-#     # Initialize your RAG workflow here.
-#     app = initialize_app(
-#         st.session_state.selected_model,
-#         st.session_state.selected_embedding_model,
-#         st.session_state.selected_routing_model,
-#         st.session_state.selected_grading_model,
-#         st.session_state.hybrid_search,
-#         st.session_state.internet_search,
-#         st.session_state.answer_style
-#     )
-    
-#     # (Optional) Initialize your primary LLM if needed.
-#     # st.session_state.llm = ChatOpenAI(model="gpt-4o", temperature=0.5)
-
-# # -------------------- Process a Pending Follow-Up (if any) --------------------
-# # Now that `app` is defined, process any pending follow-up.
-# if st.session_state.pending_followup is not None:
-#     question = st.session_state.pending_followup
-#     st.session_state.pending_followup = None  # Clear to ensure one-time processing.
-#     process_question(question, st.session_state.answer_style)
-#     st.rerun()  # Rerun the app to update the conversation state.
-
-# # -------------------- Main Title & Introduction --------------------
-# st.title("📘 Smart Guide for Entrepreneurship and Business Planning in Finland")
-# st.markdown(
-#     """
-#     <div style="text-align: left; font-size: 18px; margin-top: 20px; line-height: 1.6;">
-#         🤖 <b>Welcome to your Smart Business Guide!</b><br>
-#         I am here to assist you with:<br>
-#         <ul style="list-style-position: inside; text-align: left; display: inline-block;">
-#             <li>Finding answers from business and entrepreneurship guides in Finland</li>
-#             <li>Providing up-to-date information via AI-based internet search</li>
-#             <li>Automatically triggering search based on your query</li>
-#             <li>Specialized tools for tax-related info, permits, registrations, and more</li>
-#         </ul>
-#         <p style="margin-top: 10px;"><b>Start by typing your question in the chat below!</b></p>
-#     </div>
-#     """,
-#     unsafe_allow_html=True
-# )
-
-# # -------------------- Display Conversation History --------------------
-# for message in st.session_state.messages:
-#     if message["role"] == "user":
-#         with st.chat_message("user"):
-#             st.markdown(f"**You:** {message['content']}")
-#     elif message["role"] == "assistant":
-#         with st.chat_message("assistant"):
-#             # Process the response to add styling to references
-#             import re
-#             styled_response = re.sub(
-#                 r'\[(.*?)\]',
-#                 r'<span class="reference">[\1]</span>',
-#                 message['content']
-#             )
-#             st.markdown(
-#                 f"**Assistant:** {styled_response}",
-#                 unsafe_allow_html=True
-#             )
-
-# # -------------------- Process New User Input --------------------
-# user_input = st.chat_input("Type your question (Max. 200 char):")
-# if user_input:
-#     if len(user_input) > 200:
-#         st.error("Your question exceeds 200 characters. Please shorten it and try again.")
-#     else:
-#         process_question(user_input, st.session_state.answer_style)
-#         st.rerun()
-
-# # -------------------- Generate and Display Follow-Up Questions --------------------
-# if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
-#     last_assistant_message = st.session_state.messages[-1]["content"]
-#     last_user_message = next(
-#         (msg["content"] for msg in reversed(st.session_state.messages) if msg["role"] == "user"),
-#         ""
-#     )
-#     if st.session_state.last_assistant != last_assistant_message:
-#         st.session_state.last_assistant = last_assistant_message
-#         st.session_state.followup_questions = get_followup_questions(last_user_message, last_assistant_message)
-    
-#     st.markdown("#### Related:")
-#     for i, question in enumerate(st.session_state.followup_questions):
-#         if st.button(question, key=f"followup_{i}_{st.session_state.followup_key}"):
-#             st.session_state.pending_followup = question
-#             st.rerun()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

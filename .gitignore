@@ -1,4 +1,5 @@
 .myenv
+myenv
 secrets.toml
 .streamlit/secrets.toml
 __pycache__/*

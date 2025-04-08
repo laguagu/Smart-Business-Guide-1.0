@@ -30,6 +30,14 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Create .streamlit directory with proper permissions
+RUN mkdir -p /app/.streamlit && \
+    chmod 777 /app/.streamlit
+
+# Fix the torch.classes.__path__ issue
+RUN echo 'torch.classes.__path__ = []' > /app/.streamlit/config.py && \
+    chmod 644 /app/.streamlit/config.py
+
 # Copy application code (using wildcard to avoid missing file errors)
 COPY *.py .
 COPY entrypoint.sh .
@@ -44,9 +52,6 @@ COPY data/chroma_db_llamaparse-openai/ /app/data/chroma_db_llamaparse-openai/
 # Create images directory and copy only the required logo
 RUN mkdir -p /app/images
 COPY images/LOGO_UPBEAT.jpg /app/images/
-
-# Fix the torch.classes.__path__ issue
-RUN mkdir -p /app/.streamlit && echo 'torch.classes.__path__ = []' > /app/.streamlit/config.py
 
 # Expose Streamlit port
 EXPOSE 8501

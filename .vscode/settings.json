@@ -1,0 +1,12 @@
+{
+    "sqltools.useNodeRuntime": true,
+    "postman.settings.dotenv-detection-notification-visibility": false,
+    "sqltools.connections": [
+        {
+            "previewLimit": 50,
+            "driver": "SQLite",
+            "database": "${workspaceFolder:Smart-Business-Guide-1.0}/data/chroma_db_llamaparse-openai/chroma.sqlite3",
+            "name": "ChromaDB"
+        }
+    ]
+}
